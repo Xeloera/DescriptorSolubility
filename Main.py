@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """
-Enhanced Solubility Workbench 2025 - Comprehensive Analysis Suite
 ================================================================
 
 A complete solubility prediction workbench featuring:
