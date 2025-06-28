@@ -1,10 +1,10 @@
 # Solubility Prediction Framework
 
-A comprehensive machine learning framework for predicting molecular solubility using advanced molecular descriptors, ensemble methods, and GPU acceleration.
+A comprehensive machine learning framework for predicting molecular solubility using molecular descriptors, ensemble methods, and GPU acceleration.
 
 ## Overview
 
-This framework provides state-of-the-art solubility prediction capabilities through:
+This framework provides solubility prediction capabilities through:
 
 - **Advanced Molecular Descriptors**: DScribe SOAP, Sine Matrix, MBTR descriptors combined with traditional fingerprints
 - **OpenCOSMO Integration**: Quantum mechanical solvent descriptors for enhanced accuracy
