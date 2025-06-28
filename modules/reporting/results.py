@@ -228,9 +228,28 @@ class Results:
         if results_by_solvent:
             print(f"\nSOLVENT ANALYSIS:")
             print("-" * 20)
-            valid_solvents = {k: v for k, v in results_by_solvent.items() if not np.isnan(v['rmse'])}
+            # Filter for solvents with valid RMSE values (R² can be NaN which is acceptable)
+            valid_solvents = {k: v for k, v in results_by_solvent.items() 
+                            if isinstance(v['rmse'], (int, float)) and not np.isnan(v['rmse'])}
+            
             for solvent, metrics in sorted(valid_solvents.items(), key=lambda x: x[1]['rmse']):
-                print(f"{solvent}: RMSE={metrics['rmse']:.4f}, R²={metrics['r2']:.4f}")
+                # Safe formatting that handles NaN and non-numeric values
+                rmse_val = metrics['rmse']
+                r2_val = metrics['r2']
+                
+                # Format RMSE
+                if isinstance(rmse_val, (int, float)) and not np.isnan(rmse_val):
+                    rmse_str = f"{rmse_val:.4f}"
+                else:
+                    rmse_str = "N/A"
+                
+                # Format R²
+                if isinstance(r2_val, (int, float)) and not np.isnan(r2_val):
+                    r2_str = f"{r2_val:.4f}"
+                else:
+                    r2_str = "N/A"
+                
+                print(f"{solvent}: RMSE={rmse_str}, R²={r2_str}")
         
         # Save detailed results
         results_df.to_csv(self.output_dir / "enhanced_detailed_results.csv", index=False)
@@ -280,34 +299,86 @@ class Results:
             y_pred = result['predictions']
             
             # Get solvent names for test indices (for readable output)
-            test_solvent_names = self.df.iloc[test_indices][self.config.solvent_name_col]
-            
-            for i, solvent_name in enumerate(test_solvent_names):
-                if solvent_name not in solvent_results:
-                    solvent_results[solvent_name] = {'true': [], 'pred': []}
+            try:
+                # Check if solvent_name_col exists in the dataframe
+                if self.config.solvent_name_col in self.df.columns:
+                    test_solvent_names = self.df.iloc[test_indices][self.config.solvent_name_col]
+                else:
+                    # Fallback to using solvent_col if solvent_name_col doesn't exist
+                    print(f"Warning: Column '{self.config.solvent_name_col}' not found. Using '{self.config.solvent_col}' instead.")
+                    test_solvent_names = self.df.iloc[test_indices][self.config.solvent_col]
                 
-                solvent_results[solvent_name]['true'].append(y_true[i])
-                solvent_results[solvent_name]['pred'].append(y_pred[i])
+                for i, solvent_name in enumerate(test_solvent_names):
+                    if solvent_name not in solvent_results:
+                        solvent_results[solvent_name] = {'true': [], 'pred': []}
+                    
+                    solvent_results[solvent_name]['true'].append(y_true[i])
+                    solvent_results[solvent_name]['pred'].append(y_pred[i])
+                    
+            except Exception as e:
+                print(f"Error processing solvent names for result: {e}")
+                print(f"Available columns: {list(self.df.columns)}")
+                print(f"Test indices: {test_indices[:5]}... (showing first 5)")
+                print(f"DataFrame shape: {self.df.shape}")
+                continue
         
         # Calculate metrics by solvent
         solvent_metrics = {}
         for solvent_name, data in solvent_results.items():
-
-            true_vals = np.array(data['true'])
-            pred_vals = np.array(data['pred'])
-            
-            solvent_metrics[solvent_name] = {
-                'count': len(true_vals),
-                'rmse': rmse(true_vals, pred_vals),
-                'r2': r2(true_vals, pred_vals),
-                'mae': mae(true_vals, pred_vals)}
+            try:
+                true_vals = np.array(data['true'])
+                pred_vals = np.array(data['pred'])
                 
+                # Only calculate metrics if we have enough data points
+                if len(true_vals) >= 2:  # Need at least 2 points for meaningful metrics
+                    r2_val = r2(true_vals, pred_vals)
+                    rmse_val = rmse(true_vals, pred_vals)
+                    mae_val = mae(true_vals, pred_vals)
+                    
+                    solvent_metrics[solvent_name] = {
+                        'count': len(true_vals),
+                        'rmse': rmse_val,
+                        'r2': r2_val if not np.isnan(r2_val) else "N/A (degenerate case)",
+                        'mae': mae_val,
+                        'variance_true': np.var(true_vals),
+                        'variance_pred': np.var(pred_vals)
+                    }
+                    
+                    # Print warning for problematic cases
+                    if np.isnan(r2_val):
+                        print(f"Warning: R² calculation failed for '{solvent_name}' - likely degenerate case")
+                        print(f"  Data points: {len(true_vals)}, True variance: {np.var(true_vals):.6f}, Pred variance: {np.var(pred_vals):.6f}")
+                    
+                else:
+                    print(f"Skipping solvent '{solvent_name}' - insufficient data points ({len(true_vals)})")
+            except Exception as e:
+                print(f"Error calculating metrics for solvent '{solvent_name}': {e}")
+                continue
         
         # Save solvent analysis
-        solvent_df = pd.DataFrame.from_dict(solvent_metrics, orient='index')
-        if not solvent_df.empty:
-            solvent_df.to_csv(self.output_dir / "solvent_analysis.csv")
-            print(f"Analyzed {len(solvent_metrics)} solvents with sufficient data")
+        if solvent_metrics:
+            solvent_df = pd.DataFrame.from_dict(solvent_metrics, orient='index')
+            if not solvent_df.empty:
+                solvent_df.to_csv(self.output_dir / "solvent_analysis.csv")
+                print(f"Analyzed {len(solvent_metrics)} solvents with sufficient data")
+                
+                # Print summary of solvent analysis
+                print("\nSolvent Analysis Summary:")
+                print(f"  Total solvents analyzed: {len(solvent_metrics)}")
+                
+                # Count valid R² values
+                valid_r2_count = sum(1 for metrics in solvent_metrics.values() 
+                                   if isinstance(metrics['r2'], (int, float)) and not np.isnan(metrics['r2']))
+                print(f"  Solvents with valid R²: {valid_r2_count}")
+                
+                if valid_r2_count > 0:
+                    valid_r2_values = [metrics['r2'] for metrics in solvent_metrics.values() 
+                                     if isinstance(metrics['r2'], (int, float)) and not np.isnan(metrics['r2'])]
+                    print(f"  R² range: {min(valid_r2_values):.3f} to {max(valid_r2_values):.3f}")
+                    print(f"  Mean R²: {np.mean(valid_r2_values):.3f}")
+                
+        else:
+            print("No solvent metrics calculated - check data and column names")
         
         return solvent_metrics
     
@@ -595,9 +666,30 @@ class Results:
                 sorted_solvents = sorted(solvent_analysis.items(), 
                                        key=lambda x: x[1]['rmse'])
                 for solvent, metrics in sorted_solvents[:10]:  # Top 10
-                    f.write(f"| {solvent} | {metrics['rmse']:.4f} | "
-                           f"{metrics['r2']:.4f} | {metrics['mae']:.4f} | "
-                           f"{metrics['count']} |\n")
+                    # Safe formatting that handles NaN and non-numeric values
+                    rmse_val = metrics['rmse']
+                    r2_val = metrics['r2']
+                    mae_val = metrics['mae']
+                    
+                    # Format RMSE
+                    if isinstance(rmse_val, (int, float)) and not np.isnan(rmse_val):
+                        rmse_str = f"{rmse_val:.4f}"
+                    else:
+                        rmse_str = "N/A"
+                    
+                    # Format R²
+                    if isinstance(r2_val, (int, float)) and not np.isnan(r2_val):
+                        r2_str = f"{r2_val:.4f}"
+                    else:
+                        r2_str = "N/A"
+                    
+                    # Format MAE
+                    if isinstance(mae_val, (int, float)) and not np.isnan(mae_val):
+                        mae_str = f"{mae_val:.4f}"
+                    else:
+                        mae_str = "N/A"
+                    
+                    f.write(f"| {solvent} | {rmse_str} | {r2_str} | {mae_str} | {metrics['count']} |\n")
             
             f.write("\n## Files Generated\n\n")
             f.write("- `detailed_results.csv` - Complete results for all configurations\n")
@@ -680,13 +772,36 @@ class Results:
                 f.write("| Solvent | RMSE | R² | MAE | Count |\n")
                 f.write("|---------|------|----|----|-------|\n")
                 
-                valid_solvents = {k: v for k, v in results_by_solvent.items() if not np.isnan(v['rmse'])}
+                # Filter for solvents with valid RMSE values (R² can be NaN/string which is acceptable)
+                valid_solvents = {k: v for k, v in results_by_solvent.items() 
+                                if isinstance(v['rmse'], (int, float)) and not np.isnan(v['rmse'])}
                 sorted_solvents = sorted(valid_solvents.items(), key=lambda x: x[1]['rmse'])
                 
                 for solvent, metrics in sorted_solvents[:20]:  # Top 20 best performing solvents
-                    f.write(f"| {solvent} | {metrics['rmse']:.4f} | "
-                           f"{metrics['r2']:.4f} | {metrics['mae']:.4f} | "
-                           f"{metrics['count']} |\n")
+                    # Safe formatting that handles NaN and non-numeric values
+                    rmse_val = metrics['rmse']
+                    r2_val = metrics['r2']
+                    mae_val = metrics['mae']
+                    
+                    # Format RMSE
+                    if isinstance(rmse_val, (int, float)) and not np.isnan(rmse_val):
+                        rmse_str = f"{rmse_val:.4f}"
+                    else:
+                        rmse_str = "N/A"
+                    
+                    # Format R²
+                    if isinstance(r2_val, (int, float)) and not np.isnan(r2_val):
+                        r2_str = f"{r2_val:.4f}"
+                    else:
+                        r2_str = "N/A"
+                    
+                    # Format MAE
+                    if isinstance(mae_val, (int, float)) and not np.isnan(mae_val):
+                        mae_str = f"{mae_val:.4f}"
+                    else:
+                        mae_str = "N/A"
+                    
+                    f.write(f"| {solvent} | {rmse_str} | {r2_str} | {mae_str} | {metrics['count']} |\n")
         
         print(f"Enhanced report saved to: {report_path}")
     
