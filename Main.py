@@ -935,8 +935,13 @@ class RobustPCA(BaseEstimator, TransformerMixin):
         return self.fit(X, y).transform(X)
 
 # ═════════════════════════ MIXTURE OF EXPERTS ══════════════════════════════════════════
-from cuml.linear_model import LogisticRegression 
-from cuml import KMeans
+# Prefer GPU-accelerated implementations when available, but fall back to sklearn
+try:
+    from cuml.linear_model import LogisticRegression
+    from cuml import KMeans
+except Exception:  # cuml not available
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.cluster import KMeans
 
 class MixtureOfExpertsRegressor(BaseEstimator, TransformerMixin):
     """Mixture of Experts with gating network for high/low solubility prediction"""
