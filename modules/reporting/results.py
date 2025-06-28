@@ -106,7 +106,7 @@ class Results:
         
         print(f"\nAnalysis complete! Results saved to: {self.output_dir}")
     
-    def analyze_and_report_results_enhanced(self, all_results, output_dir, df, feature_matrices):
+    def analyze_and_report_results_enhanced(self, all_results, output_dir, df, feature_matrices, X):
         """Enhanced result analysis with OpenCOSMO and drip-feeding comparison"""
         # Store parameters as instance variables for use in other methods
         self.output_dir = output_dir
@@ -115,18 +115,16 @@ class Results:
         self.y = df[self.config.target_col]
         
         # Set up feature matrix and names from feature_matrices
+        # Note: feature_matrices contains tuples of (X_matrix, feature_names)
         if feature_matrices and 'with_cosmo' in feature_matrices:
-            self.X = feature_matrices['with_cosmo']
-            # Generate feature names - this is a simplified approach
-            self.feature_names = [f"feature_{i}" for i in range(self.X.shape[1])]
+            self.X, self.feature_names = feature_matrices['with_cosmo']
         elif feature_matrices and len(feature_matrices) > 0:
             # Use the first available feature matrix
             first_key = list(feature_matrices.keys())[0]
-            self.X = feature_matrices[first_key]
-            self.feature_names = [f"feature_{i}" for i in range(self.X.shape[1])]
+            self.X, self.feature_names = feature_matrices[first_key]
         else:
-            # Fallback - create minimal feature matrix
-            self.X = df.select_dtypes(include=[np.number]).values
+            # Fallback - use the passed X parameter
+            self.X = X
             self.feature_names = [f"feature_{i}" for i in range(self.X.shape[1])]
         
         print(f"\n{'='*80}")

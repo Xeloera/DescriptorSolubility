@@ -240,7 +240,8 @@ class SolubilityAnalyzer:
             all_results, 
             self.output_dir,
             self.df,
-            self.feature_matrices
+            self.feature_matrices,
+            self.X
         )
         
         return all_results

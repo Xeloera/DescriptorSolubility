@@ -60,9 +60,9 @@ def main():
             {"use_pca": False},  # No PCA for direct feature interpretation
            #{"use_pca": True, "n_components": 500}  # High-dimensional PCA for noise reduction
         ],
-        outer_folds=5,  # Standard 10-fold CV
-        inner_folds=5,  # Reduced inner folds for speed
-        search_iterations=6,  # More iterations for better hyperparameter search
+        outer_folds=2,  # Standard 10-fold CV
+        inner_folds=2,  # Reduced inner folds for speed
+        search_iterations=1,  # More iterations for better hyperparameter search
         create_visualizations=True,  # Enable enhanced visualizations
         use_gpu=USE_CUML,  # Maximum GPU acceleration
         use_open_cosmo=True,  # Use OpenCOSMO features - critical for performance!
@@ -91,7 +91,7 @@ def main():
     # Initialize analyzer
     analyzer = SolubilityAnalyzer(config)
     r = Reporter(config, analyzer)
-    r.sot
+    r.sot()
     
     # Run analysis
     start_time = time.time()
@@ -99,7 +99,7 @@ def main():
         all_results = analyzer.analysis()
         total_time = time.time() - start_time
         
-        r.eot(config, analyzer, all_results, total_time)
+        r.eot(all_results, total_time)
 
         
     except Exception as e:
