@@ -22,6 +22,9 @@ from modules.config import Config
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from tqdm import tqdm
 from sklearn.model_selection import KFold
+from scipy.sparse import csr_matrix, hstack as sparse_hstack
+from sklearn.decomposition import TruncatedSVD, PCA
+import gc
 
 # Constants from Config
 SEED = 42
@@ -136,7 +139,16 @@ class DScribeDescriptor:
             if not valid_indices:
                 if self.config.verbose > 0:
                     print(f"Warning: No valid species found. Symbols: {set(symbols)}, Known species: {SPECIES}")
-                return None
+                # Try to add missing species dynamically if they're common
+                unknown_species = set(symbols) - set(SPECIES)
+                for species in unknown_species:
+                    if species in ['B', 'Si', 'Se', 'As']:  # Common heteroatoms
+                        SPECIES.append(species)
+                        print(f"Added {species} to known species list")
+                # Retry with updated species list
+                valid_indices = [i for i, s in enumerate(symbols) if s in SPECIES]
+                if not valid_indices:
+                    return None
             
             filtered_symbols = [symbols[i] for i in valid_indices]
             filtered_positions = positions[valid_indices]
@@ -260,13 +272,37 @@ class DScribeDescriptor:
         print(f"Calculating DScribe descriptors for {len(smiles_list)} molecules...")
         print(f"Enabled descriptors: {self.descriptor_names}")
         
-        # Convert SMILES to molecules
-        mols = [Chem.MolFromSmiles(smi) for smi in smiles_list]
+        # Convert SMILES to molecules with error tracking
+        mols = []
+        failed_indices = []
+        for i, smi in enumerate(smiles_list):
+            try:
+                # Clean SMILES string
+                smi_clean = smi.strip()
+                if not smi_clean:
+                    mols.append(None)
+                    failed_indices.append(i)
+                    continue
+                    
+                mol = Chem.MolFromSmiles(smi_clean)
+                if mol is None:
+                    failed_indices.append(i)
+                    if self.config.verbose > 0:
+                        print(f"Failed to parse SMILES at index {i}: {smi_clean[:50]}...")
+                mols.append(mol)
+            except Exception as e:
+                mols.append(None)
+                failed_indices.append(i)
+                if self.config.verbose > 0:
+                    print(f"Exception parsing SMILES at index {i}: {e}")
+        
         valid_mols = [mol for mol in mols if mol is not None]
         print(f"Valid molecules from SMILES: {len(valid_mols)}/{len(mols)}")
+        if failed_indices and self.config.verbose > 0:
+            print(f"Failed indices: {failed_indices[:10]}..." if len(failed_indices) > 10 else f"Failed indices: {failed_indices}")
         
         if len(valid_mols) == 0:
-            print("Warning: No valid molecules created from SMILES!")
+            print("ERROR: No valid molecules created from SMILES!")
             return {}, []
         
         with ProcessPoolExecutor(max_workers=min(self.config.n_jobs, 8)) as executor:
@@ -484,6 +520,25 @@ class Fingerprint:
                 dscribe_results, _ = self.dscribe_suite.calculate_batch(solute_smiles_list)
                 
                 for desc_name, desc_matrix in dscribe_results.items():
+                    # Apply compression if enabled for SOAP and Sine matrices
+                    if self.config.compress_descriptors and self.config.descriptor_specific_compression:
+                        if "soap" in desc_name and desc_matrix.shape[1] > self.config.soap_compression_components:
+                            print(f"Compressing SOAP descriptor from {desc_matrix.shape[1]} to {self.config.soap_compression_components} components...")
+                            if self.config.compression_method == "pca":
+                                compressor = PCA(n_components=self.config.soap_compression_components, random_state=42)
+                            else:  # SVD
+                                compressor = TruncatedSVD(n_components=self.config.soap_compression_components, random_state=42)
+                            desc_matrix = compressor.fit_transform(desc_matrix)
+                            print(f"Compression ratio: {compressor.explained_variance_ratio_.sum():.2%}")
+                        elif "sine" in desc_name and desc_matrix.shape[1] > self.config.sine_compression_components:
+                            print(f"Compressing Sine descriptor from {desc_matrix.shape[1]} to {self.config.sine_compression_components} components...")
+                            if self.config.compression_method == "pca":
+                                compressor = PCA(n_components=self.config.sine_compression_components, random_state=42)
+                            else:  # SVD
+                                compressor = TruncatedSVD(n_components=self.config.sine_compression_components, random_state=42)
+                            desc_matrix = compressor.fit_transform(desc_matrix)
+                            print(f"Compression ratio: {compressor.explained_variance_ratio_.sum():.2%}")
+                    
                     all_features.append(desc_matrix)
                     names = [f"solute_dscribe_{desc_name}_{i}" for i in range(desc_matrix.shape[1])]
                     feature_names.extend(names)
@@ -496,6 +551,25 @@ class Fingerprint:
                 dscribe_results, _ = self.dscribe_suite.calculate_batch(solvent_smiles_list)
                 
                 for desc_name, desc_matrix in dscribe_results.items():
+                    # Apply compression if enabled for SOAP and Sine matrices
+                    if self.config.compress_descriptors and self.config.descriptor_specific_compression:
+                        if "soap" in desc_name and desc_matrix.shape[1] > self.config.soap_compression_components:
+                            print(f"Compressing SOAP descriptor from {desc_matrix.shape[1]} to {self.config.soap_compression_components} components...")
+                            if self.config.compression_method == "pca":
+                                compressor = PCA(n_components=self.config.soap_compression_components, random_state=42)
+                            else:  # SVD
+                                compressor = TruncatedSVD(n_components=self.config.soap_compression_components, random_state=42)
+                            desc_matrix = compressor.fit_transform(desc_matrix)
+                            print(f"Compression ratio: {compressor.explained_variance_ratio_.sum():.2%}")
+                        elif "sine" in desc_name and desc_matrix.shape[1] > self.config.sine_compression_components:
+                            print(f"Compressing Sine descriptor from {desc_matrix.shape[1]} to {self.config.sine_compression_components} components...")
+                            if self.config.compression_method == "pca":
+                                compressor = PCA(n_components=self.config.sine_compression_components, random_state=42)
+                            else:  # SVD
+                                compressor = TruncatedSVD(n_components=self.config.sine_compression_components, random_state=42)
+                            desc_matrix = compressor.fit_transform(desc_matrix)
+                            print(f"Compression ratio: {compressor.explained_variance_ratio_.sum():.2%}")
+                    
                     all_features.append(desc_matrix)
                     names = [f"solvent_dscribe_{desc_name}_{i}" for i in range(desc_matrix.shape[1])]
                     feature_names.extend(names)
@@ -515,24 +589,121 @@ class Fingerprint:
         if not all_features:
             raise ValueError("No features calculated successfully")
         
-        # Combine all features with feature engineering
+        # Check total feature count before combining
+        total_features = sum(f.shape[1] for f in all_features)
+        print(f"Total features before combination: {total_features}")
+        
+        # Memory optimization: combine features in chunks if too large
+        if total_features > self.config.max_features_before_selection:
+            print(f"WARNING: Feature count ({total_features}) exceeds threshold ({self.config.max_features_before_selection})")
+            print("Applying variance-based feature selection to each feature type...")
+            
+            # Apply variance threshold to each feature type separately
+            from sklearn.feature_selection import VarianceThreshold
+            filtered_features = []
+            filtered_names = []
+            
+            start_idx = 0
+            for i, feat_array in enumerate(all_features):
+                end_idx = start_idx + feat_array.shape[1]
+                feat_names = feature_names[start_idx:end_idx]
+                
+                # Apply variance threshold
+                selector = VarianceThreshold(threshold=self.config.variance_threshold)
+                try:
+                    feat_filtered = selector.fit_transform(feat_array)
+                    selected_indices = selector.get_support(indices=True)
+                    selected_names = [feat_names[idx] for idx in selected_indices]
+                    
+                    filtered_features.append(feat_filtered)
+                    filtered_names.extend(selected_names)
+                    
+                    print(f"Feature type {i}: {feat_array.shape[1]} -> {feat_filtered.shape[1]} features")
+                except Exception as e:
+                    print(f"Warning: Failed to filter feature type {i}: {e}")
+                    filtered_features.append(feat_array)
+                    filtered_names.extend(feat_names)
+                
+                start_idx = end_idx
+            
+            all_features = filtered_features
+            feature_names = filtered_names
+        
+        # Combine all features
         feature_matrix = np.hstack(all_features).astype(np.float32)
         
-        #Add feature engineering: polynomial features for key descriptors
-        if len(all_features) > 2:  # Only if we have multiple feature types
-            # Create interaction features between first two feature types
-            feat1 = all_features[0][:, :min(50, all_features[0].shape[1])]  # First 120 features
-            feat2 = all_features[1][:, :min(50, all_features[1].shape[1])]  # First 120 features
+        # Check for sparsity and convert if beneficial
+        sparsity = np.sum(feature_matrix == 0) / feature_matrix.size
+        print(f"Feature matrix sparsity: {sparsity:.2%}")
+        
+        # Store original dense matrix for interaction features
+        dense_feature_matrix = feature_matrix
+        
+        # Convert to sparse if beneficial (but keep dense for now)
+        use_sparse = sparsity > 0.5 and self.config.use_sparse_matrices
+        if use_sparse:
+            print("High sparsity detected - will convert to sparse after feature engineering")
+        
+        # Add feature engineering: interaction features for key descriptors
+        if len(all_features) >= 2 and self.config.add_interaction_features:  # Only if we have multiple feature types
+            # Determine optimal number of features for interactions
+            max_interaction_features = min(50, all_features[0].shape[1] // 2, all_features[1].shape[1] // 2)
             
-            # Element-wise multiplication (interaction)
-            interaction_features = feat1 * feat2
-            feature_matrix = np.hstack([feature_matrix, interaction_features])
-            
-            # Add interaction feature names
-            interaction_names = [f"interaction_{i}" for i in range(interaction_features.shape[1])]
-            feature_names.extend(interaction_names)
-            
-            print(f"Added {interaction_features.shape[1]} interaction features")
+            if max_interaction_features > 0:
+                # Create interaction features between first two feature types
+                feat1 = all_features[0][:, :max_interaction_features]
+                feat2 = all_features[1][:, :max_interaction_features]
+                
+                # Element-wise multiplication (interaction)
+                interaction_features = feat1 * feat2
+                
+                # Add L2 norm features for magnitude interactions
+                norm_features = np.sqrt(feat1**2 + feat2**2)
+                
+                # Add difference features
+                diff_features = np.abs(feat1 - feat2)
+                
+                # Combine interaction features
+                all_interactions = np.hstack([interaction_features, norm_features, diff_features])
+                dense_feature_matrix = np.hstack([dense_feature_matrix, all_interactions])
+                
+                # Add interaction feature names
+                interaction_names = [f"interaction_mult_{i}" for i in range(interaction_features.shape[1])]
+                norm_names = [f"interaction_norm_{i}" for i in range(norm_features.shape[1])]
+                diff_names = [f"interaction_diff_{i}" for i in range(diff_features.shape[1])]
+                feature_names.extend(interaction_names + norm_names + diff_names)
+                
+                print(f"Added {all_interactions.shape[1]} interaction features:")
+                print(f"  - {interaction_features.shape[1]} multiplicative")
+                print(f"  - {norm_features.shape[1]} norm-based")
+                print(f"  - {diff_features.shape[1]} difference-based")
+        
+        # Add ASE-based solvent-solute interaction features if enabled
+        if self.config.add_ase_interactions and self.dscribe_suite:
+            try:
+                print("\nCalculating ASE-based solvent-solute interactions...")
+                ase_features = self._calculate_ase_interactions(solute_smiles_list, solvent_smiles_list)
+                if ase_features is not None:
+                    dense_feature_matrix = np.hstack([dense_feature_matrix, ase_features])
+                    ase_names = [f"ase_interaction_{i}" for i in range(ase_features.shape[1])]
+                    feature_names.extend(ase_names)
+                    print(f"Added {ase_features.shape[1]} ASE interaction features")
+            except Exception as e:
+                print(f"Warning: Failed to calculate ASE interactions: {e}")
+        
+        # Now convert to sparse if needed
+        if use_sparse:
+            print("Converting final feature matrix to sparse format...")
+            feature_matrix = csr_matrix(dense_feature_matrix)
+            gc.collect()
+        else:
+            feature_matrix = dense_feature_matrix
+        
+        # IMPORTANT: Keep dense format for now due to model compatibility
+        # Many sklearn models have issues with sparse matrices
+        if use_sparse:
+            print("Note: Keeping dense format for model compatibility")
+            feature_matrix = dense_feature_matrix
         
         print(f"Final feature matrix shape: {feature_matrix.shape}")
         print(f"Features breakdown:")
@@ -542,6 +713,57 @@ class Fingerprint:
         
         return feature_matrix, feature_names
 
+    def _calculate_ase_interactions(self, solute_smiles_list, solvent_smiles_list):
+        """Calculate ASE-based solvent-solute interaction features"""
+        try:
+            from ase.atoms import Atoms
+            from ase.geometry import distance
+            
+            interaction_features = []
+            
+            for solute_smi, solvent_smi in zip(solute_smiles_list, solvent_smiles_list):
+                try:
+                    # Convert to molecules
+                    solute_mol = Chem.MolFromSmiles(solute_smi)
+                    solvent_mol = Chem.MolFromSmiles(solvent_smi)
+                    
+                    if solute_mol is None or solvent_mol is None:
+                        interaction_features.append(np.zeros(10))  # Default features
+                        continue
+                    
+                    # Get basic properties
+                    solute_mw = Descriptors.MolWt(solute_mol)
+                    solvent_mw = Descriptors.MolWt(solvent_mol)
+                    solute_logp = Descriptors.MolLogP(solute_mol)
+                    solvent_logp = Descriptors.MolLogP(solvent_mol)
+                    solute_tpsa = Descriptors.TPSA(solute_mol)
+                    solvent_tpsa = Descriptors.TPSA(solvent_mol)
+                    
+                    # Calculate interaction features
+                    features = [
+                        solute_mw / (solvent_mw + 1e-6),  # MW ratio
+                        abs(solute_logp - solvent_logp),  # LogP difference
+                        solute_tpsa * solvent_tpsa / 10000,  # TPSA interaction
+                        (solute_logp + solvent_logp) / 2,  # LogP average
+                        np.exp(-abs(solute_logp - solvent_logp)),  # LogP similarity
+                        min(solute_tpsa, solvent_tpsa) / (max(solute_tpsa, solvent_tpsa) + 1e-6),  # TPSA ratio
+                        Descriptors.NumHDonors(solute_mol) * Descriptors.NumHAcceptors(solvent_mol),  # H-bond potential
+                        Descriptors.NumHAcceptors(solute_mol) * Descriptors.NumHDonors(solvent_mol),  # Reverse H-bond
+                        abs(Descriptors.NumRotatableBonds(solute_mol) - Descriptors.NumRotatableBonds(solvent_mol)),  # Flexibility diff
+                        (Descriptors.NumAromaticRings(solute_mol) + Descriptors.NumAromaticRings(solvent_mol)) / 2  # Aromaticity
+                    ]
+                    
+                    interaction_features.append(features)
+                    
+                except Exception:
+                    interaction_features.append(np.zeros(10))  # Default features on error
+            
+            return np.array(interaction_features, dtype=np.float32)
+            
+        except Exception as e:
+            print(f"Error in ASE interaction calculation: {e}")
+            return None
+    
     def _extract_solvent_features(self, df, use_open_cosmo=True):
         """Extract solvent features from dataframe with OpenCOSMO control"""
         # Select columns based on OpenCOSMO flag

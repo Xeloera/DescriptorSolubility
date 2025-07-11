@@ -1,15 +1,20 @@
 from modules.config import Config
 from modules.dataset import Fingerprint
-from modules.model_picker import ModelSuite
+from modules.models.model_picker import ModelSuite
 from modules.models.mixtureofexpertsregressor import MixtureOfExpertsRegressor
 from modules.functions.metrics import (rmse, mae, mape, r2, explained_var)
 from modules.dataset import DripFeedingCV
+from modules.reporting.enhanced_visualizations import EnhancedVisualizer
 
 from datetime import datetime
 import json 
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
+from pathlib import Path
+import warnings
+warnings.filterwarnings('ignore')
 try:
     import cupy as cp
     from cuml.decomposition import PCA 
@@ -807,7 +812,12 @@ class Results:
     
     def create_enhanced_visualizations(self, all_results, results_df):
         """Create enhanced visualization suite with MoE and OpenCOSMO analysis"""
-        print(f"\nCreating enhanced visualizations...")
+        # Use the new enhanced visualizer for comprehensive plots
+        visualizer = EnhancedVisualizer(self.config)
+        visualizer.create_all_visualizations(all_results, self.output_dir, self.df)
+        
+        # Also create the existing specialized plots
+        print(f"\nCreating additional specialized visualizations...")
         
         viz_dir = self.output_dir / "enhanced_visualizations"
         viz_dir.mkdir(exist_ok=True)

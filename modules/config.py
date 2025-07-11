@@ -28,9 +28,7 @@ class Config:
     target_col: str = "solubility_g_100g_log"
     
     solute_col: str = "solute_smiles"
-    solvent_name_col: str = "solvent_name"  # Keep names for readable output/analysis
-    
-    solvent_col: str = "solvent_smiles"  # FIXED: Use SMILES for molecular descriptors!
+    solvent_col: str = "solvent_smiles"  # Use SMILES for molecular descriptors
     solvent_name_col: str = "solvent_name"  # Keep names for readable output/analysis
     
     # ↑ This gives us the best of both: 
@@ -68,8 +66,11 @@ class Config:
     
     # Mixture of Experts configuration
     use_mixture_of_experts: bool = True
-    moe_threshold_method: str = "solubility_cutoff"  # "median", "percentile", "kmeans", "solubility_cutoff"
+    moe_threshold_method: str = "solubility_cutoff"  # "median", "percentile", "kmeans", "solubility_cutoff", "gradient_based"
     moe_threshold_value: float = 0.5  # For percentile method (ignored for solubility_cutoff)
+    moe_n_experts: int = 3  # Number of experts for advanced methods
+    moe_gate_type: str = "soft"  # "soft" or "hard" gating
+    moe_regularization: float = 0.01  # Regularization for gate network
     
     # OpenCOSMO and solvent features
     use_open_cosmo: bool = True
@@ -77,8 +78,14 @@ class Config:
     
     # Model configurations
     models: List[str] = field(default_factory=lambda: [
-        "xgboost", "lightgbm", "random_forest", "neural_network"
+        "xgboost", "lightgbm", "random_forest", "neural_network", "logistic_regression"
     ])
+    
+    # Feature importance and model interpretation
+    calculate_feature_importance: bool = True  # Calculate feature importances
+    use_shap: bool = False  # Use SHAP for model interpretation (slower)
+    calculate_model_metrics: bool = True  # Calculate BIC/AIC-like metrics
+    importance_threshold: float = 0.001  # Threshold for feature importance
     
     # Dimensionality reduction
     pca_configs: List[Dict] = field(default_factory=lambda: [
@@ -132,6 +139,19 @@ class Config:
     regularization_strength: str = "medium"  # "light", "medium", "strong", "very_strong"
     enable_regularized_models: bool = True  # Enable Ridge, Lasso, ElasticNet, SVR, BayesianRidge
     
+    # Feature Engineering Control
+    add_interaction_features: bool = True  # Add interaction features between descriptors
+    add_ase_interactions: bool = True  # Add ASE-based solvent-solute interactions
+    max_features_before_selection: int = 150000  # Maximum features before applying selection
+    use_sparse_matrices: bool = True  # Convert to sparse matrices when beneficial
+    
+    # Compression options for descriptors
+    compress_descriptors: bool = False  # Compress descriptor matrices
+    compression_method: str = "pca"  # "pca", "svd", "autoencoder"
+    soap_compression_components: int = 500  # Components for SOAP compression
+    sine_compression_components: int = 30  # Components for Sine matrix compression
+    descriptor_specific_compression: bool = True  # Apply compression only to SOAP and Sine
+    
     # Feature Selection for Regularization
     use_feature_selection: bool = True  # Enable feature selection
     feature_selection_methods: List[str] = field(default_factory=lambda: [
@@ -139,7 +159,7 @@ class Config:
     ])
     variance_threshold: float = 0.01  # Threshold for variance-based feature selection
     
-    SPECIES = ["H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I"]
+    SPECIES = ["H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "B", "Si", "Se", "As"]  # Extended with common heteroatoms
     N_ATOMS_MAX = 200
     SINE_EIGS = 50
     SOAP_DIM = None
@@ -282,7 +302,9 @@ class Config:
         'solute_fr_term_acetylene', 'solute_fr_tetrazole', 'solute_fr_thiazole', 'solute_fr_thiocyan',
         'solute_fr_thiophene', 'solute_fr_unbrch_alkane', 'solute_fr_urea'
     ]
-    ALL_COL = OPEN_COSMO + PRECOMPUTED_SOLVENT_FEATURES + PRECOMPUTED_SOLUTE_FEATURES
+    @property
+    def ALL_COL(self):
+        return self.OPEN_COSMO + self.PRECOMPUTED_SOLVENT_FEATURES + self.PRECOMPUTED_SOLUTE_FEATURES
     
 
     def config_json(self):

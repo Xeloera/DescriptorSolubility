@@ -111,3 +111,7 @@ Desktop.ini
 *.temp
 temp/
 tmp/
+
+CLAUDE.md
+.claude
+SCIENTIFIC_DOCUMENTATION.md

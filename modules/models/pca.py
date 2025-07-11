@@ -59,19 +59,45 @@ class RobustPCA(BaseEstimator, TransformerMixin):
         return self
     
     def _fallback_to_cpu(self, X):
-        """Fallback to CPU PCA implementation"""
+        """Fallback to CPU PCA implementation with smart solver selection"""
         try:
             # Use sklearn PCA
             from sklearn.decomposition import PCA
+            
+            # Determine optimal parameters for high-dimensional data
+            n_samples, n_features = X.shape
+            max_components = min(n_samples, n_features) - 1
+            
+            # Adjust n_components if needed
+            if isinstance(self.n_components, int):
+                actual_components = min(self.n_components, max_components)
+            else:  # fraction
+                actual_components = self.n_components
+            
+            # Choose solver based on data dimensions
+            if n_features > 500 and (isinstance(actual_components, float) or actual_components > 100):
+                svd_solver = 'randomized'
+                if self.verbose:
+                    print(f"Using randomized SVD for {n_features} features")
+            else:
+                svd_solver = 'auto'
+            
             self.pca_model = PCA(
-                n_components=self.n_components,
-                whiten=True
+                n_components=actual_components,
+                whiten=True,
+                svd_solver=svd_solver,
+                random_state=42
             )
             self.pca_model.fit(X)
             self.using_gpu = False
             
             if self.verbose:
-                print(f"✅ CPU PCA fallback successful")
+                if hasattr(self.pca_model, 'explained_variance_ratio_'):
+                    explained_var = self.pca_model.explained_variance_ratio_.sum()
+                    n_comp = self.pca_model.n_components_
+                    print(f"✅ CPU PCA successful - {n_comp} components explain {explained_var:.2%} variance")
+                else:
+                    print(f"✅ CPU PCA fallback successful")
                 
         except Exception as e:
             if self.verbose:

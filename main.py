@@ -60,9 +60,9 @@ def main():
             {"use_pca": False},  # No PCA for direct feature interpretation
            #{"use_pca": True, "n_components": 500}  # High-dimensional PCA for noise reduction
         ],
-        outer_folds=2,  # Standard 10-fold CV
-        inner_folds=2,  # Reduced inner folds for speed
-        search_iterations=1,  # More iterations for better hyperparameter search
+        outer_folds=10,  # Standard 10-fold CV
+        inner_folds=10,  # Reduced inner folds for speed
+        search_iterations=20,  # More iterations for better hyperparameter search
         create_visualizations=True,  # Enable enhanced visualizations
         use_gpu=USE_CUML,  # Maximum GPU acceleration
         use_open_cosmo=True,  # Use OpenCOSMO features - critical for performance!
@@ -77,7 +77,18 @@ def main():
         enable_regularized_models=True,  # Enable Ridge, Lasso, ElasticNet
         use_feature_selection=True,  # Disable feature selection initially to isolate issues
         feature_selection_methods=["variance","elastic_net","bayesian_ridge"],  # Simplified
-        variance_threshold=0.001  # Lower threshold
+        variance_threshold=0.01,  # Higher threshold to remove more features
+        
+        # Feature engineering controls
+        add_interaction_features=False,  # Disable to reduce feature count
+        add_ase_interactions=True,  # Disable ASE interactions
+        max_features_before_selection=20000,  # Aggressive feature reduction
+        
+        # Compression settings
+        compress_descriptors=True,  # Enable descriptor compression
+        compression_method="pca",
+        soap_compression_components=100,  # Aggressive SOAP compression
+        sine_compression_components=20  # Keep most sine features
     )
     
     

@@ -21,17 +21,30 @@ except ImportError:
 class MixtureOfExpertsRegressor(BaseEstimator, TransformerMixin):
     """Mixture of Experts with gating network for high/low solubility prediction"""
     
-    def __init__(self, low_model, high_model, threshold_method="median", threshold_value=0.25, verbose=False):
+    def __init__(self, low_model, high_model, threshold_method="median", threshold_value=0.25, 
+                 n_experts=2, gate_type="soft", regularization=0.01, verbose=False):
         self.low_model = low_model
         self.high_model = high_model
         self.threshold_method = threshold_method
         self.threshold_value = threshold_value
+        self.n_experts = n_experts
+        self.gate_type = gate_type
+        self.regularization = regularization
         self.verbose = verbose
+        
+        # Initialize gating network with regularization
         self.gating_network = LogisticRegression(
             max_iter=5000,  # Increased iterations
             tol=1e-4,       # Better tolerance
-            solver='qn',    # Quasi-Newton solver
-            C=1.0)          # Regularization
+            solver='lbfgs',  # LBFGS solver
+            C=1.0/self.regularization if self.regularization > 0 else 1e10,  # Convert to C parameter
+            multi_class='ovr' if n_experts > 2 else 'auto'
+        )
+        
+        # For multi-expert scenario
+        if n_experts > 2:
+            self.expert_models = [low_model, high_model]  # Will extend dynamically
+        
         self.threshold = None
         self.is_fitted = False
         self._fit_count = 0  # Track how many times fit() is called
@@ -72,6 +85,13 @@ class MixtureOfExpertsRegressor(BaseEstimator, TransformerMixin):
                         best_threshold = thresh
             
             return best_threshold
+        elif self.threshold_method == "gradient_based":
+            # Use gradient of sorted values to find natural breaks
+            sorted_y = np.sort(y)
+            gradients = np.diff(sorted_y)
+            # Find largest gradient (biggest jump)
+            max_grad_idx = np.argmax(gradients)
+            return sorted_y[max_grad_idx]
         elif self.threshold_method == "kmeans":
             # Use K-means to find natural split
             kmeans = KMeans(n_clusters=2, 

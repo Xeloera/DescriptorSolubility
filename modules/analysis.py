@@ -1,10 +1,11 @@
 from modules.config import Config
 from modules.dataset import Fingerprint
-from modules.model_picker import ModelSuite
+from modules.models.model_picker import ModelSuite
 from modules.models.mixtureofexpertsregressor import MixtureOfExpertsRegressor
 from modules.functions.metrics import (rmse, mae, mape, r2, explained_var)
 from modules.dataset import DripFeedingCV
 from modules.reporting.results import Results
+from modules.functions.model_interpretation import ModelInterpreter
 
 from pathlib import Path
 import os
@@ -59,9 +60,14 @@ class SolubilityAnalyzer:
         print(f"Results will be saved to: {self.output_dir}")
     
     def load_and_prepare_data(self):
-        """Load and prepare the dataset"""
+        """Load and prepare the dataset with error handling"""
         print("Loading dataset...")
-        self.df = pd.read_csv(self.config.tsv_path, sep='\t', low_memory=False)
+        try:
+            self.df = pd.read_csv(self.config.tsv_path, sep='\t', low_memory=False)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Dataset file not found: {self.config.tsv_path}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load dataset: {e}")
         
         print(f"Dataset shape: {self.df.shape}")
         print(f"Target column: {self.config.target_col}")
@@ -69,8 +75,25 @@ class SolubilityAnalyzer:
         print(f"Unique solvents (by SMILES): {self.df[self.config.solvent_col].nunique()}")
         print(f"Target statistics:\n{self.df[self.config.target_col].describe()}")
         
-        # Extract target values
-        self.y = self.df[self.config.target_col].astype(float).values
+        # Validate required columns
+        required_cols = [self.config.target_col, self.config.solute_col, 
+                        self.config.solvent_col, self.config.solvent_name_col]
+        missing_cols = [col for col in required_cols if col not in self.df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+        
+        # Extract target values with validation
+        try:
+            self.y = pd.to_numeric(self.df[self.config.target_col], errors='coerce').values
+            if np.isnan(self.y).any():
+                nan_count = np.isnan(self.y).sum()
+                print(f"Warning: {nan_count} NaN values found in target column. Removing...")
+                valid_indices = ~np.isnan(self.y)
+                self.df = self.df[valid_indices].reset_index(drop=True)
+                self.y = self.y[valid_indices]
+        except Exception as e:
+            raise ValueError(f"Failed to extract target values: {e}")
+        
         self.smiles = self.df[self.config.solute_col].tolist()
         self.solvents = self.df[self.config.solvent_col].tolist()  # SMILES for descriptors
         self.solvent_names = self.df[self.config.solvent_name_col].tolist()  # Names for output
@@ -201,6 +224,24 @@ class SolubilityAnalyzer:
                                     'explained_variance': explained_var(y_test, y_pred)
                                 }
                                 
+                                # Calculate model complexity metrics (BIC/AIC-like)
+                                if self.config.calculate_model_metrics:
+                                    interpreter = ModelInterpreter(self.config)
+                                    complexity_metrics = interpreter.calculate_complexity_metrics(
+                                        search.best_estimator_, X_train, y_train, X_test, y_test
+                                    )
+                                    metrics.update(complexity_metrics)
+                                
+                                # Calculate feature importance if enabled
+                                feature_importance = None
+                                if self.config.calculate_feature_importance:
+                                    try:
+                                        feature_importance = interpreter.get_feature_importance(
+                                            search.best_estimator_, feature_names
+                                        )
+                                    except:
+                                        pass  # Some models don't support feature importance
+                                
                                 # Store result
                                 result = {
                                     'matrix_type': matrix_type,
@@ -214,7 +255,8 @@ class SolubilityAnalyzer:
                                     'true_values': y_test,
                                     'test_indices': test_idx,
                                     'best_estimator': search.best_estimator_,
-                                    'feature_names': feature_names
+                                    'feature_names': feature_names,
+                                    'feature_importance': feature_importance
                                 }
                                 all_results.append(result)
                                 
@@ -226,7 +268,11 @@ class SolubilityAnalyzer:
                                 print(f"    {model_name} (PCA: {pca_config.get('use_pca', False)}): RMSE={metrics['rmse']:.4f}, R²={metrics['r2']:.4f}")
                                 
                             except Exception as e:
-                                print(f"    Failed: {e}")
+                                print(f"    Failed {model_name} with PCA={pca_config.get('use_pca', False)}: {str(e)[:100]}")
+                                # Log detailed error for debugging
+                                if self.config.verbose > 1:
+                                    import traceback
+                                    traceback.print_exc()
                     
                     # Save best model for this fold
                     if fold_best and self.config.save_models:

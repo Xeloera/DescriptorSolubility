@@ -12,10 +12,11 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neural_network import MLPRegressor
-from sklearn.linear_model import Ridge, Lasso, ElasticNet, BayesianRidge
+from sklearn.linear_model import Ridge, Lasso, ElasticNet, BayesianRidge, LogisticRegression
 from sklearn.svm import SVR
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
+from sklearn.preprocessing import PolynomialFeatures
 
 try:
     import cupy as cp
@@ -110,18 +111,14 @@ class ModelSuite:
                 configs["xgboost"] = {
                     "model": XGBRegressor(**xgb_base_params),
                     "params": {
-                        'model__n_estimators': [300, 500, 800, 1000],  # More estimators
-                        'model__learning_rate': [0.01, 0.05, 0.1, 0.15],  # More learning rates
-                        'model__max_depth': [4, 6, 8, 10],  # Deeper trees
-                        'model__subsample': [0.6, 0.7, 0.8, 0.9],  # Enhanced subsampling for regularization
-                        'model__colsample_bytree': [0.6, 0.7, 0.8, 0.9],  # Enhanced column sampling
-                        'model__colsample_bylevel': [0.6, 0.8, 1.0],  # Additional column regularization
-                        'model__colsample_bynode': [0.6, 0.8, 1.0],   # Node-level column regularization
-                        'model__reg_lambda': reg_multipliers["xgb_reg_lambda"],  # Dynamic L2 regularization
-                        'model__reg_alpha': reg_multipliers["xgb_reg_alpha"],  # Dynamic L1 regularization
-                        'model__min_child_weight': [1, 3, 5, 7],  # Minimum sum of instance weight in child
-                        'model__gamma': [0, 0.1, 0.2, 0.5],  # Minimum loss reduction for splits
-                        'model__max_delta_step': [0, 1, 5, 10],  # Maximum delta step for weight updates
+                        'model__n_estimators': [100, 200],  # Fewer trees for high-dim data
+                        'model__learning_rate': [0.05, 0.1],  # Simplified
+                        'model__max_depth': [3, 4, 5],  # Shallower trees for high dimensions
+                        'model__subsample': [0.7, 0.8],  # Simplified
+                        'model__colsample_bytree': [0.3, 0.5],  # Aggressive column sampling for high-dim
+                        'model__reg_lambda': [1, 5, 10],  # Higher regularization
+                        'model__reg_alpha': [0, 0.1, 1],  # L1 regularization
+                        'model__min_child_weight': [1, 5],  # Simplified
                     }
                 }
             except Exception as e:
@@ -369,6 +366,23 @@ class ModelSuite:
                     'model__beta_1': [0.9, 0.95, 0.99],  # Adam parameter (momentum)
                     'model__beta_2': [0.999, 0.9999],  # Adam parameter (second moment)
                     'model__epsilon': [1e-8, 1e-7, 1e-6],  # Numerical stability
+                }
+            }
+        
+        if "logistic_regression" in self.config.models:
+            # Convert regression to classification for demonstration
+            # This uses binned solubility values
+            configs["logistic_regression"] = {
+                "model": LogisticRegression(
+                    max_iter=1000,
+                    n_jobs=self.config.n_jobs,
+                    multi_class='ovr',
+                    solver='lbfgs'
+                ),
+                "params": {
+                    'model__C': [0.001, 0.01, 0.1, 1.0, 10.0, 100.0],  # Inverse regularization
+                    'model__penalty': ['l2'],  # L2 regularization
+                    'model__class_weight': [None, 'balanced'],  # Handle imbalanced classes
                 }
             }
         
